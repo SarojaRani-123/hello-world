@@ -1,0 +1,30 @@
+site_name: "testhe"  # Change this to the desired site name
+domain_name: "testhe.guidingcare.com"  # Change this to the desired domain name
+ 
+apps:
+  FICOAPI:
+    enabled: 1
+  SSISAPI:
+    enabled: 1
+  ProviderRegistration:
+    enabled: 1
+  Portal:
+    enabled: 1
+  SmartComm:
+    enabled: 1
+  Intercall:
+    enabled: 1
+  MCG:
+    enabled: 1
+  MemberPortal:
+    enabled: 1
+  MemberServices:
+    enabled: 1
+  IAR:
+    enabled: 1
+  RealTime:
+    enabled: 1
+  MobileAPI:
+    enabled: 0
+  GCRealTime:
+    enabled: 1

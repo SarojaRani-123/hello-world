@@ -1,0 +1,98 @@
+---
+- name: Deploy IIS with Folder Structure and Applications
+  hosts: windows
+  vars_files:
+    - vars.yml  # Include your vars file here
+  tasks:
+    # Step 1: Install Server Manager and IIS using DISM
+    - name: Install Server Manager and IIS using DISM
+      win_shell: |
+        dism /online /enable-feature /featurename:ServerManager-Core-RSAT /all
+        dism /online /enable-feature /featurename:IIS-WebServerRole /all
+      register: install_server_iis
+ 
+    # Step 2: Check if 'deployment' directory exists
+    - name: Check if 'deployment' directory exists
+      win_stat:
+        path: C:\inetpub\wwwroot\deployment
+      register: deployment_dir
+ 
+    # Step 3: Create 'deployment' directory if it doesn't exist
+    - name: Create 'deployment' directory if it doesn't exist
+      win_file:
+        path: C:\inetpub\wwwroot\deployment
+        state: directory
+      when: not deployment_dir.stat.exists
+ 
+    # Step 4: Check if 'documents' directory exists
+    - name: Check if 'documents' directory exists
+      win_stat:
+        path: C:\inetpub\wwwroot\documents
+      register: documents_dir
+ 
+    # Step 5: Create 'documents' directory if it doesn't exist
+    - name: Create 'documents' directory if it doesn't exist
+      win_file:
+        path: C:\inetpub\wwwroot\documents
+        state: directory
+      when: not documents_dir.stat.exists
+ 
+    # Step 6: Create main folder structure for the site (unconditional)
+    - name: Create main folder structure for site
+      win_file:
+        path: C:\inetpub\wwwroot\deployment\{{ site_name }}
+        state: directory
+ 
+    # Step 7: Create subfolder structure based on variable file
+    - name: Create subfolders for applications
+      win_file:
+        path: C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}
+        state: directory
+      loop: "{{ apps.keys() }}"
+      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+ 
+    # Step 8: Create the IIS site for the client (no binding here)
+    - name: Create IIS site '{{ site_name }}'
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebSite -Name '{{ site_name }}' -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}' -Port 80
+      register: create_site
+ 
+    # Step 9: Ensure application pools exist for each application with the specified name format
+    - name: Create application pools for applications
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebAppPool -Name 'app_pool_{{ site_name }}_{{ item }}'
+      loop: "{{ apps.keys() }}"
+      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+ 
+    # Step 10: Add HTTP and HTTPS bindings for the site using host headers
+    - name: Add HTTP and HTTPS bindings to '{{ site_name }}' site
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebBinding -Name '{{ site_name }}' -Protocol http -Port 80 -HostHeader '{{ domain_name }}'
+        New-WebBinding -Name '{{ site_name }}' -Protocol https -Port 443 -HostHeader '{{ domain_name }}'
+      when: create_site.changed
+ 
+    # Step 11: Map applications to their respective application pools
+    - name: Map applications to application pools
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebApplication -Site '{{ site_name }}' -Name '{{ item }}' -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}' -ApplicationPool 'app_pool_{{ site_name }}_{{ item }}'
+      loop: "{{ apps.keys() }}"
+      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+ 
+# Step 12: Fetch the node's IP address dynamically (exclude 127.0.0.1)
+    - name: Get the IP address of the node (slave machine)
+      win_shell: |
+       $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' }).IPAddress
+        echo $ip
+      register: node_ip
+ 
+    # Step 13: Add the node's IP address and domain name to the hosts file
+    - name: Add node IP address and domain name to hosts file
+      win_lineinfile:
+        path: C:\Windows\System32\drivers\etc\hosts
+        line: "{{ node_ip.stdout }} {{ domain_name }}"
+        create: yes
+        state: present
