@@ -1,0 +1,9 @@
+---
+- name: Deploy HTML file to Windows machine
+  hosts: windows
+  tasks:
+    - name: Copy HTML file to the destination
+      win_copy:
+        src: /root/saroja/index.html  # Path to your local HTML file on the Ansible control node
+        dest: C:\inetpub\wwwroot\deployment\testms\Portal # Destination path on the Windows machine
+        become: yes
