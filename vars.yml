@@ -1,5 +1,5 @@
-site_name: "testhe"  # Change this to the desired site name
-domain_name: "testhe.guidingcare.com"  # Change this to the desired domain name
+site_name: "testms"  # Change this to the desired site name
+domain_name: "testms.guidingcare.com"  # Change this to the desired domain name
  
 apps:
   FICOAPI:
