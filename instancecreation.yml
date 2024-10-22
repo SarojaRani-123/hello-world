@@ -4,7 +4,7 @@
   vars_files
     - vars.yml  # Include your vars file here
  
-  tasks
+  tasks:
     # Step 1 Install Server Manager and IIS using DISM
     - name Install Server Manager and IIS using DISM
       win_shell 
