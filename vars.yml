@@ -1,6 +1,6 @@
 # General site configuration
-site_name: "tesrk"  # Change this to the desired site name
-domain_name: "testrk.guidingcare.com"  # Change this to the desired domain name
+site_name: "testkk"  # Change this to the desired site name
+domain_name: "testkk.guidingcare.com"  # Change this to the desired domain name
  
 # Applications configuration (define the folder structure and enable/disable each app)
 apps:
