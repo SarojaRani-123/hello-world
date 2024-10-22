@@ -2,7 +2,8 @@
 - name: Deploy IIS with Folder Structure and Applications
   hosts: windows
   vars_files:
-    - vars.yml  # Include your vars file here
+    - vars1.yml  # Include your vars file here
+ 
   tasks:
     # Step 1: Install Server Manager and IIS using DISM
     - name: Install Server Manager and IIS using DISM
@@ -24,34 +25,38 @@
         state: directory
       when: not deployment_dir.stat.exists
  
-    # Step 4: Check if 'documents' directory exists
-    - name: Check if 'documents' directory exists
-      win_stat:
-        path: C:\inetpub\wwwroot\documents
-      register: documents_dir
- 
-    # Step 5: Create 'documents' directory if it doesn't exist
-    - name: Create 'documents' directory if it doesn't exist
-      win_file:
-        path: C:\inetpub\wwwroot\documents
-        state: directory
-      when: not documents_dir.stat.exists
- 
-    # Step 6: Create main folder structure for the site (unconditional)
+    # Step 4: Create main folder structure for site
     - name: Create main folder structure for site
       win_file:
         path: C:\inetpub\wwwroot\deployment\{{ site_name }}
         state: directory
  
-    # Step 7: Create subfolder structure based on variable file
+    # Step 5: Create subfolders for applications
     - name: Create subfolders for applications
       win_file:
         path: C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}
         state: directory
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+      when: apps[item].enabled == 1  # Check if enabled
  
-    # Step 8: Create the IIS site for the client (no binding here)
+    # Step 6: Create CloudAPI folder structure if enabled
+    - name: Create CloudAPI folder structure
+      win_file:
+        path: C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI
+        state: directory
+      when: cloudapis.CloudAPI.enabled == 1  # Check if CloudAPI is enabled
+ 
+    # Step 7: Create subfolders for CloudAPI if enabled
+    - name: Create subfolders for CloudAPI applications
+      win_file:
+        path: C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI\{{ item.name }}
+        state: directory
+      loop: "{{ cloudapis.CloudAPI.subfolders }}"
+      loop_control:
+       label: "{{ item.name }}"
+      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1  # Check if enabled
+ 
+    # Step 8: Create IIS site for the client (no binding here)
     - name: Create IIS site '{{ site_name }}'
       win_shell: |
         Import-Module WebAdministration
@@ -64,9 +69,26 @@
         Import-Module WebAdministration
         New-WebAppPool -Name 'app_pool_{{ site_name }}_{{ item }}'
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+      when: apps[item].enabled == 1  # Check if enabled
  
-    # Step 10: Add HTTP and HTTPS bindings for the site using host headers
+    # Step 10: Create application pool for CloudAPI if enabled
+    - name: Create application pool for CloudAPI
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebAppPool -Name 'app_pool_{{ site_name }}_CloudAPI'
+      when: cloudapis.CloudAPI.enabled == 1  # Check if CloudAPI is enabled
+ 
+    # Step 11: Create application pools for CloudAPI subfolders if enabled
+    - name: Create application pools for CloudAPI subfolders
+      win_shell: |
+        Import-Module WebAdministration
+        New-WebAppPool -Name 'app_pool_{{ site_name }}_CloudAPI_{{ item.name }}'
+      loop: "{{ cloudapis.CloudAPI.subfolders }}"
+      loop_control:
+       label: "{{ item.name }}"
+      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1  # Check if enabled
+ 
+    # Step 12: Add HTTP and HTTPS bindings for the site using host headers
     - name: Add HTTP and HTTPS bindings to '{{ site_name }}' site
       win_shell: |
         Import-Module WebAdministration
@@ -74,22 +96,22 @@
         New-WebBinding -Name '{{ site_name }}' -Protocol https -Port 443 -HostHeader '{{ domain_name }}'
       when: create_site.changed
  
-    # Step 11: Map applications to their respective application pools
+    # Step 13: Map applications to their respective application pools
     - name: Map applications to application pools
       win_shell: |
         Import-Module WebAdministration
         New-WebApplication -Site '{{ site_name }}' -Name '{{ item }}' -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}' -ApplicationPool 'app_pool_{{ site_name }}_{{ item }}'
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Access the 'enabled' key properly
+      when: apps[item].enabled == 1  # Check if enabled
  
-# Step 12: Fetch the node's IP address dynamically (exclude 127.0.0.1)
+# Step 14: Fetch the node's IP address dynamically (exclude 127.0.0.1)
     - name: Get the IP address of the node (slave machine)
       win_shell: |
        $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' }).IPAddress
         echo $ip
       register: node_ip
  
-    # Step 13: Add the node's IP address and domain name to the hosts file
+    # Step 15: Add the node's IP address and domain name to the hosts file
     - name: Add node IP address and domain name to hosts file
       win_lineinfile:
         path: C:\Windows\System32\drivers\etc\hosts
