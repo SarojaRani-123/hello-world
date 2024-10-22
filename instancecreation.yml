@@ -2,7 +2,7 @@
 - name: Deploy IIS with Folder Structure and Applications
   hosts: windows
   vars_files:
-    - vars1.yml  # Include your vars file here
+    - vars.yml  # Include your vars file here
  
   tasks:
     # Step 1: Install Server Manager and IIS using DISM
