@@ -1,6 +1,8 @@
-site_name: "testms"  # Change this to the desired site name
-domain_name: "testms.guidingcare.com"  # Change this to the desired domain name
+# General site configuration
+site_name: "testhe"  # Change this to the desired site name
+domain_name: "testhe.guidingcare.com"  # Change this to the desired domain name
  
+# Applications configuration (define the folder structure and enable/disable each app)
 apps:
   FICOAPI:
     enabled: 1
@@ -12,7 +14,7 @@ apps:
     enabled: 1
   SmartComm:
     enabled: 1
-  Intercall:
+  Interqual:
     enabled: 1
   MCG:
     enabled: 1
@@ -28,3 +30,23 @@ apps:
     enabled: 0
   GCRealTime:
     enabled: 1
+ 
+  # Add the cloudapi folder structure and option to enable/disable subfolders
+cloudapis:
+  CloudAPI:
+    enabled: 1
+    subfolders:
+      - name: "Account"
+        enabled: 1
+      - name: "Activity"
+        enabled: 0
+      - name: "SDOH"
+        enabled: 1
+      - name: "Sdohwebhook"
+        enabled: 0
+      - name: "Document"
+        enabled: 1
+      - name: "Authorization"
+        enabled: 1
+      - name: "Alert"
+        enabled: 1
