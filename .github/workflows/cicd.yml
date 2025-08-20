@@ -1,16 +1,16 @@
-name: Client Deployment
+name: 7-Step Deployment with API-wise Deployment
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: 'Client name'
+        description: 'Client name (e.g., client1)'
         required: true
-      environment:
-        description: 'Target environment'
+      env:
+        description: 'Environment (pp, prod, qa)'
         required: true
       version:
-        description: 'Artifact version (e.g. v8.2025.06)'
+        description: 'Artifact version (e.g., v8.2025.06)'
         required: true
  
 jobs:
@@ -18,62 +18,74 @@ jobs:
     runs-on: windows-latest
  
     steps:
-      # Step 1 - Checkout repo
-      - name: Checkout repo
+      # 1️⃣ Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
  
-      # Step 2 - Set environment variables
-      - name: Set variables
-        run: |
-          echo "CLIENT=${{ github.event.inputs.client }}" >> $env:GITHUB_ENV
-          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $env:GITHUB_ENV
-          echo "VERSION=${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
-          echo "Deploying client ${{ github.event.inputs.client }} to ${{ github.event.inputs.environment }} with version ${{ github.event.inputs.version }}"
- 
-      # Step 3 - Locate artifact folder
-      - name: Locate artifacts
-        run: |
-          $folder = "artifacts/artifacts_${{ github.event.inputs.version }}"
-          if (!(Test-Path $folder)) {
-            Write-Error "❌ Artifact folder not found: $folder"
-            exit 1
-          }
-          echo "ARTIFACT_FOLDER=$folder" >> $env:GITHUB_ENV
-          echo "Found artifacts in $folder"
- 
-      # Step 4 - Extract all .zip subfolders (NEW ADDITION)
-      - name: Extract API zips
+      # 2️⃣ Load client config
+      - name: Load Client Config
         shell: pwsh
         run: |
-          $artifactFolder = "${{ env.ARTIFACT_FOLDER }}"
-          Write-Host "🔍 Looking for zip files in $artifactFolder..."
+          $client = "${{ github.event.inputs.client }}"
+          $envName = "${{ github.event.inputs.env }}"
+          $configPath = ".\configs\$client\$envName\config.json"
+          if (Test-Path $configPath) {
+              Write-Host "Config loaded for $client in $envName environment"
+              $config = Get-Content $configPath | ConvertFrom-Json
+              Write-Host "App Root Path: $($config.appRootPath)"
+              Write-Host "APIs: $($config.apiNames -join ', ')"
+          } else {
+              Write-Host "Config not found for $client in $envName environment"
+              exit 1
+          }
+ 
+      # 3️⃣ Set artifact version
+      - name: Set Artifact Version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          Write-Host "Artifact version set to $version"
+          echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
+ 
+      # 4️⃣ Extract artifact ZIPs (fixed safe extraction)
+      - name: Extract Artifact ZIPs
+        shell: pwsh
+        run: |
+          $artifactFolder = ".\artifacts\artifacts_${{ env.ARTIFACT_VERSION }}"
+          $destRoot = "$env:GITHUB_WORKSPACE\extracted"
+ 
+          # Create extracted folder
+          if (-Not (Test-Path $destRoot)) { New-Item -ItemType Directory -Force -Path $destRoot }
+ 
+          # Extract each .zip inside artifact folder
           Get-ChildItem -Path $artifactFolder -Filter *.zip | ForEach-Object {
               $zipFile = $_.FullName
-              $destDir = Join-Path $artifactFolder ($_.BaseName)
-              if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
+              $destDir = Join-Path $destRoot ($_.BaseName)
+              if (Test-Path $destDir) { Remove-Item -Recurse -Force $destDir }
               Expand-Archive -Path $zipFile -DestinationPath $destDir -Force
-              Write-Host "✅ Extracted $($_.Name) to $destDir"
+              Write-Host "Extracted $($_.Name) to $destDir"
           }
  
-      # Step 5 - Deploy using MSDeploy (OLD CODE)
-      - name: Deploy with MSDeploy
+      # 5️⃣ Deploy APIs to Local IIS
+      - name: Deploy APIs
         shell: pwsh
         run: |
-          $artifactFolder = "${{ env.ARTIFACT_FOLDER }}"
-          $apps = Get-ChildItem -Path $artifactFolder -Directory
-          foreach ($app in $apps) {
-            Write-Host "🚀 Deploying $($app.FullName)..."
-            & "C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
-              -verb:sync `
-              -source:contentPath="$($app.FullName)" `
-              -dest:contentPath="Default Web Site/$($app.Name)",computerName="https://${{ secrets.DEST_SERVER }}:8172/msdeploy.axd?site=Default Web Site",userName="${{ secrets.DEST_USER }}",password="${{ secrets.DEST_PASSWORD }}",authtype="Basic"
+          $iisRoot = $config.appRootPath
+          if (-Not (Test-Path $iisRoot)) { New-Item -ItemType Directory -Path $iisRoot }
+ 
+          $artifactRoot = "$env:GITHUB_WORKSPACE\extracted"
+          foreach ($api in $config.apiNames) {
+              $sourcePath = Join-Path $artifactRoot $api
+              $destPath = Join-Path $iisRoot $api
+              if (-Not (Test-Path $destPath)) { New-Item -ItemType Directory -Path $destPath }
+              Write-Host "Deploying API '$api' from '$sourcePath' to '$destPath'"
+              Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
           }
  
-      # Step 6 - Verify
-      - name: Verify Deployment
-        run: |
-          echo "✅ Deployment completed for ${{ env.CLIENT }} - ${{ env.ENVIRONMENT }} (version ${{ env.VERSION }})"
+      # 6️⃣ Post-deployment step
+      - name: Post Deployment Step
+        run: Write-Host "Post-deployment step executed"
  
-      # Step 7 - Cleanup
-      - name: Cleanup
-        run: echo "🧹 Nothing to clean, GitHub runner auto-cleans workspace."
+      # 7️⃣ Deployment complete
+      - name: Deployment Complete
+        run: Write-Host "✅ Deployment complete for client ${{ github.event.inputs.client }}, version ${{ env.ARTIFACT_VERSION }}"
