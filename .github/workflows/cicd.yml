@@ -45,24 +45,6 @@ jobs:
         run: |
           $version = "${{ github.event.inputs.version }}"
           Write-Host "Using artifact version: $version"
-       # Create Dummy Artifacts   
-      - name: Create Dummy Artifacts
-        shell: pwsh
-        run: |
-          $version = "${{ github.event.inputs.version }}"
-          $artifactPath = "./artifacts/artifacts_$version"
- 
-       # Create main artifact folder
-        New-Item -ItemType Directory -Force -Path $artifactPath
- 
-        
-        foreach ($api in @("API1","API2","API3")) {
-          $apiPath = Join-Path $artifactPath $api
-           New-Item -ItemType Directory -Force -Path $apiPath
-           New-Item -ItemType File -Force -Path (Join-Path $apiPath "dummy.txt")
-           }
-         Write-Host "✅ Dummy artifacts created at $artifactPath"
-         
      # Upload Artifacts from GitHub
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
