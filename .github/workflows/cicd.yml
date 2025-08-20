@@ -48,7 +48,7 @@ jobs:
           Write-Host "Artifact version set to $version"
           echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
  
-      # 4️⃣ Extract artifact ZIP from repo
+      # 4️⃣ Extract artifact ZIP from repo (clean folder first)
       - name: Extract Artifact ZIP
         shell: pwsh
         run: |
@@ -61,8 +61,15 @@ jobs:
               exit 1
           }
  
-          if (-Not (Test-Path $extractPath)) { New-Item -ItemType Directory -Force -Path $extractPath }
+          # Remove existing folder to avoid access denied errors
+          if (Test-Path $extractPath) {
+              Remove-Item -Recurse -Force $extractPath
+          }
  
+          # Create folder
+          New-Item -ItemType Directory -Force -Path $extractPath
+ 
+          # Extract ZIP
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
  
