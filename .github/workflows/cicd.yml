@@ -51,7 +51,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: "artifact-$version"
-          path: ./artifacts/extracted
+          path: ./artifacts/artifacts_v8.2025.06
  
       # Deploy APIs to Local IIS
       - name: Deploy APIs to Local IIS
