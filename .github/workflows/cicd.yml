@@ -45,7 +45,7 @@ jobs:
         run: |
           $version = "${{ github.event.inputs.version }}"
           Write-Host "Using artifact version: $version"
-          
+       # Create Dummy Artifacts   
       - name: Create Dummy Artifacts
   shell: pwsh
   run: |
