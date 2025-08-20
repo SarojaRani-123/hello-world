@@ -4,19 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       client:
-        description: "Client name (e.g., client1)"
+        description: 'Client name (e.g., client1)'
         required: true
       env:
-        description: "Environment (pp, prod, qa)"
+        description: 'Environment (pp, prod, qa)'
         required: true
       version:
-        description: "Artifact version (e.g., v8.2025.06)"
+        description: 'Artifact version (e.g., v8.2025.06)'
         required: true
  
 jobs:
   deploy:
     runs-on: windows-latest
- 
     steps:
       # 1️⃣ Checkout repository
       - name: Checkout repository
@@ -31,12 +30,10 @@ jobs:
           $configPath = ".\configs\$client\$envName\config.json"
  
           if (Test-Path $configPath) {
-            Write-Host "✅ Config loaded for $client in $envName environment"
+            Write-Host "Config loaded for $client in $envName environment"
             $config = Get-Content $configPath | ConvertFrom-Json
             Write-Host "App Root Path: $($config.appRootPath)"
             Write-Host "APIs: $($config.apiNames -join ', ')"
-            # Export values for later steps
-            $config | ConvertTo-Json -Compress | Out-File -FilePath $env:TEMP\clientConfig.json
           }
           else {
             Write-Host "❌ Config not found for $client in $envName environment"
@@ -51,66 +48,78 @@ jobs:
           Write-Host "Artifact version set to $version"
           echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
  
-      # 4️⃣ Extract artifact ZIPs from version folder (recursively)
-      - name: Extract Artifacts
+      # 4️⃣ Extract artifact ZIPs recursively
+      - name: Extract Artifact ZIPs Recursively
         shell: pwsh
         run: |
           $version = "${{ env.ARTIFACT_VERSION }}"
-          $artifactFolder = "./artifacts/artifacts_$version"
+          $zipPath = "./artifacts/artifacts_$version.zip"
+          $extractPath = "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)"
  
-          if (-Not (Test-Path $artifactFolder)) {
-            Write-Host "❌ Artifact folder not found: $artifactFolder"
+          if (-Not (Test-Path $zipPath)) {
+            Write-Host "❌ Artifact ZIP not found: $zipPath"
             exit 1
           }
  
-          $extractPath = "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)"
-          if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+          if (Test-Path $extractPath) {
+            Remove-Item -Recurse -Force $extractPath
+          }
           New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
  
-          Write-Host "📦 Extracting all .zip files from $artifactFolder to $extractPath"
-          $zips = Get-ChildItem -Path $artifactFolder -Recurse -Filter *.zip
-          foreach ($zip in $zips) {
-            $targetDir = Join-Path $extractPath ($zip.BaseName)
-            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::ExtractToDirectory($zip.FullName, $targetDir)
-            Write-Host "✅ Extracted $($zip.Name) -> $targetDir"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+ 
+          function Expand-ZipRecursively($zipFile, $destDir) {
+            Write-Host "📦 Extracting $zipFile to $destDir"
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $destDir, $true)
+ 
+            # Find nested zips and expand them into their own folders
+            Get-ChildItem -Path $destDir -Recurse -Filter *.zip | ForEach-Object {
+              $innerZip = $_.FullName
+              $innerDest = Join-Path $_.DirectoryName ($_.BaseName + "_unzipped")
+              if (-not (Test-Path $innerDest)) {
+                New-Item -ItemType Directory -Force -Path $innerDest | Out-Null
+              }
+              Write-Host "➡️ Expanding nested zip $innerZip to $innerDest"
+              [System.IO.Compression.ZipFile]::ExtractToDirectory($innerZip, $innerDest, $true)
+              Remove-Item $innerZip -Force
+            }
           }
  
-      # 5️⃣ Deploy APIs dynamically to IIS paths
+          Expand-ZipRecursively $zipPath $extractPath
+          Write-Host "✅ Fully extracted artifacts to $extractPath"
+ 
+      # 5️⃣ Deploy APIs dynamically to their paths
       - name: Deploy APIs to Local IIS
         shell: pwsh
         run: |
-          $config = Get-Content $env:TEMP\clientConfig.json | ConvertFrom-Json
-          $iisRoot = $config.appRootPath
-          $extractPath = "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)"
+          $client = "${{ github.event.inputs.client }}"
+          $envName = "${{ github.event.inputs.env }}"
+          $configPath = ".\configs\$client\$envName\config.json"
+          $config = Get-Content $configPath | ConvertFrom-Json
  
+          $iisRoot = $config.appRootPath
           if (-Not (Test-Path $iisRoot)) {
-            New-Item -ItemType Directory -Path $iisRoot | Out-Null
+            New-Item -ItemType Directory -Path $iisRoot
           }
  
           foreach ($api in $config.apiNames) {
-            $sourcePath = Join-Path $extractPath $api
+            $sourcePath = Join-Path "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)" $api
             $destPath = Join-Path $iisRoot $api
  
-            if (-Not (Test-Path $sourcePath)) {
-              Write-Host "⚠️ Skipping $api because no extracted folder found"
-              continue
-            }
- 
             if (-Not (Test-Path $destPath)) {
-              New-Item -ItemType Directory -Path $destPath | Out-Null
+              New-Item -ItemType Directory -Path $destPath
             }
  
             Write-Host "🚀 Deploying API '$api' from '$sourcePath' to '$destPath'"
-            # Dummy copy, replace with MSDeploy if required
+            # Dummy copy, replace with MSDeploy for real deployment
             Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
           }
  
       # 6️⃣ Post-deployment step (placeholder)
       - name: Post Deployment Step
-        run: Write-Host "Post-deployment step executed"
+        run: Write-Host "✅ Post-deployment step executed"
  
       # 7️⃣ Deployment complete
       - name: Deployment Complete
-        run: Write-Host "✅ Deployment complete for client ${{ github.event.inputs.client }} (env=${{ github.event.inputs.env }}) version ${{ env.ARTIFACT_VERSION }}"
+        run: Write-Host "🎉 Deployment complete for client ${{ github.event.inputs.client }} version ${{ env.ARTIFACT
+ 
