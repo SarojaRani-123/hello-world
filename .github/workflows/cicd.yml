@@ -48,25 +48,20 @@ jobs:
           Write-Host "Artifact version set to $version"
           echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
  
-      # 4️⃣ Extract artifact ZIP from repo (clean folder first)
+      # 4️⃣ Extract artifact ZIP from repo (unique folder per run)
       - name: Extract Artifact ZIP
         shell: pwsh
         run: |
           $version = "${{ env.ARTIFACT_VERSION }}"
           $zipPath = "./artifacts/artifacts_$version.zip"
-          $extractPath = "./artifacts/extracted"
+          $extractPath = "./artifacts/extracted_$($env:GITHUB_RUN_ID)"  # unique per workflow run
  
           if (-Not (Test-Path $zipPath)) {
               Write-Host "❌ Artifact ZIP not found: $zipPath"
               exit 1
           }
  
-          # Remove existing folder to avoid access denied errors
-          if (Test-Path $extractPath) {
-              Remove-Item -Recurse -Force $extractPath
-          }
- 
-          # Create folder
+          # Create unique extraction folder
           New-Item -ItemType Directory -Force -Path $extractPath
  
           # Extract ZIP
@@ -83,7 +78,7 @@ jobs:
           if (-Not (Test-Path $iisRoot)) { New-Item -ItemType Directory -Path $iisRoot }
  
           foreach ($api in $config.apiNames) {
-              $sourcePath = "./artifacts/extracted/$api"
+              $sourcePath = "./artifacts/extracted_$($env:GITHUB_RUN_ID)/$api"
               $destPath = Join-Path $iisRoot $api
               if (-Not (Test-Path $destPath)) { New-Item -ItemType Directory -Path $destPath }
               Write-Host "Deploying API '$api' from '$sourcePath' to '$destPath'"
