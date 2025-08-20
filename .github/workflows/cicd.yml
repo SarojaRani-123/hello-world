@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ env.ARTIFACT_VERSION }}"
-          $artifactFolder = "artifacts\artifacts_$version"
+          $artifactFolder = "./artifacts\artifacts_$version"
  
           if (-Not (Test-Path $artifactFolder)) {
             Write-Host "❌ Artifact folder not found: $artifactFolder"
