@@ -1,16 +1,16 @@
-name: Deploy Application (Hosted Runner, Download Artifacts)
+name: 7-Step Deployment with API-wise Deployment
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: 'Client name (e.g., coa)'
+        description: 'Client name (e.g., client1)'
         required: true
       env:
         description: 'Environment (pp, prod, qa)'
         required: true
       version:
-        description: 'Artifact version (e.g., v8.7.2025.06)'
+        description: 'Artifact version (e.g., v8.2025.06)'
         required: true
  
 jobs:
@@ -18,75 +18,76 @@ jobs:
     runs-on: windows-latest
  
     steps:
-      # Checkout repository
+      # 1️⃣ Checkout repository
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
  
-      # Load Client Config
+      # 2️⃣ Load client config
       - name: Load Client Config
         shell: pwsh
         run: |
           $client = "${{ github.event.inputs.client }}"
-          $env = "${{ github.event.inputs.env }}"
-          $configPath = ".\configs\$client\$env\config.json"
-          
+          $envName = "${{ github.event.inputs.env }}"
+          $configPath = ".\configs\$client\$envName\config.json"
+ 
           if (Test-Path $configPath) {
-              Write-Host "Config loaded for $client in $env environment"
+              Write-Host "Config loaded for $client in $envName environment"
               $config = Get-Content $configPath | ConvertFrom-Json
               Write-Host "App Root Path: $($config.appRootPath)"
               Write-Host "APIs: $($config.apiNames -join ', ')"
           } else {
-              Write-Host "Config not found for $client in $env environment"
+              Write-Host "Config not found for $client in $envName environment"
               exit 1
-             }
-      # Set Artifact Version
+          }
+ 
+      # 3️⃣ Set artifact version from workflow input
       - name: Set Artifact Version
         shell: pwsh
         run: |
           $version = "${{ github.event.inputs.version }}"
-          Write-Host "Using artifact version: $version"
-       
-       # Download artifact ZIP from repo
-      - name: Download artifact ZIP from repo
+          Write-Host "Artifact version set to $version"
+          echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
+ 
+      # 4️⃣ Extract artifact ZIP from repo
+      - name: Extract Artifact ZIP
         shell: pwsh
         run: |
-         $version = "${{ github.event.inputs.version }}"
-         $zipPath = "./artifacts/artifacts_$version.zip"
-         $extractPath = "./artifacts/extracted"
-         
+          $version = "${{ env.ARTIFACT_VERSION }}"
+          $zipPath = "./artifacts/artifacts_$version.zip"
+          $extractPath = "./artifacts/extracted"
+ 
           if (-Not (Test-Path $zipPath)) {
-            Write-Host "❌ Artifact ZIP not found: $zipPath"
-        
-          exit 1
+              Write-Host "❌ Artifact ZIP not found: $zipPath"
+              exit 1
           }
  
-    # Ensure extraction folder exists
-    if (-Not (Test-Path $extractPath)) { New-Item -ItemType Directory -Force -Path $extractPath }
+          if (-Not (Test-Path $extractPath)) { New-Item -ItemType Directory -Force -Path $extractPath }
  
-    # Extract ZIP
-   Add-Type -AssemblyName System.IO.Compression.FileSystem
-   [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
  
-    Write-Host "✅ Artifact $zipPath extracted to $extractPath"
-          
-      # Download Artifacts from GitHub
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: "artifacts-$version"
-          path: ./artifacts/extracted
+          Write-Host "✅ Artifact $zipPath extracted to $extractPath"
  
-      # Deploy APIs to Local IIS
+      # 5️⃣ Deploy APIs dynamically to their paths
       - name: Deploy APIs to Local IIS
         shell: pwsh
         run: |
-          $iisRoot = "C:\inetpub\wwwroot\dummy-site"
+          $iisRoot = $config.appRootPath
           if (-Not (Test-Path $iisRoot)) { New-Item -ItemType Directory -Path $iisRoot }
-          
+ 
           foreach ($api in $config.apiNames) {
-              $sourcePath = "artifacts/extracted/$api"
+              $sourcePath = "./artifacts/extracted/$api"
               $destPath = Join-Path $iisRoot $api
               if (-Not (Test-Path $destPath)) { New-Item -ItemType Directory -Path $destPath }
-              Write-Host "Deploying $api from $sourcePath to $destPath"
-              msdeploy.exe -verb:sync -source:contentPath="$sourcePath" -dest:contentPath="$destPath"
-              Start-Sleep -Seconds 1
+              Write-Host "Deploying API '$api' from '$sourcePath' to '$destPath'"
+              # Dummy copy, replace with MSDeploy for real deployment
+              Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
+          }
+ 
+      # 6️⃣ Post-deployment step (placeholder)
+      - name: Post Deployment Step
+        run: Write-Host "Post-deployment step executed"
+ 
+      # 7️⃣ Deployment complete
+      - name: Deployment Complete
+        run: Write-Host "✅ Deployment simulation complete for client ${{ github.event.inputs.client }} version ${{ env.ARTIFACT_VERSION }}"
