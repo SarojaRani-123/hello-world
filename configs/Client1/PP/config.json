@@ -1,5 +1,5 @@
 {
-  "appRootPath": "C:\\inetpub\wwwroot\dummy-site",
+  "appRootPath": "C:\\inetpub\\wwwroot\\dummy-site",
   "iisSiteName" : "dummy-site",
   "apiNames" : ["API1", "API2", "API3"],
 }
