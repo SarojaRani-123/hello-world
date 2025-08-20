@@ -1,125 +1,79 @@
-name: 7-Step Deployment with API-wise Deployment
+name: Client Deployment
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: 'Client name (e.g., client1)'
+        description: 'Client name'
         required: true
-      env:
-        description: 'Environment (pp, prod, qa)'
+      environment:
+        description: 'Target environment'
         required: true
       version:
-        description: 'Artifact version (e.g., v8.2025.06)'
+        description: 'Artifact version (e.g. v8.2025.06)'
         required: true
  
 jobs:
   deploy:
     runs-on: windows-latest
+ 
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout repository
+      # Step 1 - Checkout repo
+      - name: Checkout repo
         uses: actions/checkout@v4
  
-      # 2️⃣ Load client config
-      - name: Load Client Config
-        shell: pwsh
+      # Step 2 - Set environment variables
+      - name: Set variables
         run: |
-          $client = "${{ github.event.inputs.client }}"
-          $envName = "${{ github.event.inputs.env }}"
-          $configPath = ".\configs\$client\$envName\config.json"
+          echo "CLIENT=${{ github.event.inputs.client }}" >> $env:GITHUB_ENV
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $env:GITHUB_ENV
+          echo "VERSION=${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
+          echo "Deploying client ${{ github.event.inputs.client }} to ${{ github.event.inputs.environment }} with version ${{ github.event.inputs.version }}"
  
-          if (Test-Path $configPath) {
-            Write-Host "Config loaded for $client in $envName environment"
-            $config = Get-Content $configPath | ConvertFrom-Json
-            Write-Host "App Root Path: $($config.appRootPath)"
-            Write-Host "APIs: $($config.apiNames -join ', ')"
-          }
-          else {
-            Write-Host "❌ Config not found for $client in $envName environment"
+      # Step 3 - Locate artifact folder
+      - name: Locate artifacts
+        run: |
+          $folder = "artifacts/artifacts_${{ github.event.inputs.version }}"
+          if (!(Test-Path $folder)) {
+            Write-Error "❌ Artifact folder not found: $folder"
             exit 1
           }
+          echo "ARTIFACT_FOLDER=$folder" >> $env:GITHUB_ENV
+          echo "Found artifacts in $folder"
  
-      # 3️⃣ Set artifact version from workflow input
-      - name: Set Artifact Version
+      # Step 4 - Extract all .zip subfolders (NEW ADDITION)
+      - name: Extract API zips
         shell: pwsh
         run: |
-          $version = "${{ github.event.inputs.version }}"
-          Write-Host "Artifact version set to $version"
-          echo "ARTIFACT_VERSION=$version" >> $env:GITHUB_ENV
+          $artifactFolder = "${{ env.ARTIFACT_FOLDER }}"
+          Write-Host "🔍 Looking for zip files in $artifactFolder..."
+          Get-ChildItem -Path $artifactFolder -Filter *.zip | ForEach-Object {
+              $zipFile = $_.FullName
+              $destDir = Join-Path $artifactFolder ($_.BaseName)
+              if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
+              Expand-Archive -Path $zipFile -DestinationPath $destDir -Force
+              Write-Host "✅ Extracted $($_.Name) to $destDir"
+          }
  
-      # 4️⃣ Extract artifact ZIPs recursively
-      - name: Extract Artifact ZIPs Recursively
+      # Step 5 - Deploy using MSDeploy (OLD CODE)
+      - name: Deploy with MSDeploy
         shell: pwsh
         run: |
-          $version = "${{ env.ARTIFACT_VERSION }}"
-          $zipPath = "./artifacts/artifacts_$version.zip"
-          $extractPath = "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)"
- 
-          if (-Not (Test-Path $zipPath)) {
-            Write-Host "❌ Artifact ZIP not found: $zipPath"
-            exit 1
+          $artifactFolder = "${{ env.ARTIFACT_FOLDER }}"
+          $apps = Get-ChildItem -Path $artifactFolder -Directory
+          foreach ($app in $apps) {
+            Write-Host "🚀 Deploying $($app.FullName)..."
+            & "C:\Program Files (x86)\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
+              -verb:sync `
+              -source:contentPath="$($app.FullName)" `
+              -dest:contentPath="Default Web Site/$($app.Name)",computerName="https://${{ secrets.DEST_SERVER }}:8172/msdeploy.axd?site=Default Web Site",userName="${{ secrets.DEST_USER }}",password="${{ secrets.DEST_PASSWORD }}",authtype="Basic"
           }
  
-          if (Test-Path $extractPath) {
-            Remove-Item -Recurse -Force $extractPath
-          }
-          New-Item -ItemType Directory -Force -Path $extractPath | Out-Null
- 
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
- 
-          function Expand-ZipRecursively($zipFile, $destDir) {
-            Write-Host "📦 Extracting $zipFile to $destDir"
-            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $destDir, $true)
- 
-            # Find nested zips and expand them into their own folders
-            Get-ChildItem -Path $destDir -Recurse -Filter *.zip | ForEach-Object {
-              $innerZip = $_.FullName
-              $innerDest = Join-Path $_.DirectoryName ($_.BaseName + "_unzipped")
-              if (-not (Test-Path $innerDest)) {
-                New-Item -ItemType Directory -Force -Path $innerDest | Out-Null
-              }
-              Write-Host "➡️ Expanding nested zip $innerZip to $innerDest"
-              [System.IO.Compression.ZipFile]::ExtractToDirectory($innerZip, $innerDest, $true)
-              Remove-Item $innerZip -Force
-            }
-          }
- 
-          Expand-ZipRecursively $zipPath $extractPath
-          Write-Host "✅ Fully extracted artifacts to $extractPath"
- 
-      # 5️⃣ Deploy APIs dynamically to their paths
-      - name: Deploy APIs to Local IIS
-        shell: pwsh
+      # Step 6 - Verify
+      - name: Verify Deployment
         run: |
-          $client = "${{ github.event.inputs.client }}"
-          $envName = "${{ github.event.inputs.env }}"
-          $configPath = ".\configs\$client\$envName\config.json"
-          $config = Get-Content $configPath | ConvertFrom-Json
+          echo "✅ Deployment completed for ${{ env.CLIENT }} - ${{ env.ENVIRONMENT }} (version ${{ env.VERSION }})"
  
-          $iisRoot = $config.appRootPath
-          if (-Not (Test-Path $iisRoot)) {
-            New-Item -ItemType Directory -Path $iisRoot
-          }
- 
-          foreach ($api in $config.apiNames) {
-            $sourcePath = Join-Path "$env:TEMP\artifact_extract_$($env:GITHUB_RUN_ID)" $api
-            $destPath = Join-Path $iisRoot $api
- 
-            if (-Not (Test-Path $destPath)) {
-              New-Item -ItemType Directory -Path $destPath
-            }
- 
-            Write-Host "🚀 Deploying API '$api' from '$sourcePath' to '$destPath'"
-            # Dummy copy, replace with MSDeploy for real deployment
-            Copy-Item -Path "$sourcePath\*" -Destination $destPath -Recurse -Force
-          }
- 
-      # 6️⃣ Post-deployment step (placeholder)
-      - name: Post Deployment Step
-        run: Write-Host "✅ Post-deployment step executed"
- 
-      # 7️⃣ Deployment complete
-      - name: Deployment Complete
-        run: Write-Host "🎉 Deployment complete for client ${{ github.event.inputs.client }} version ${{ env.ARTIFACT
- 
+      # Step 7 - Cleanup
+      - name: Cleanup
+        run: echo "🧹 Nothing to clean, GitHub runner auto-cleans workspace."
