@@ -60,7 +60,8 @@ jobs:
               Write-Host "❌ Artifact ZIP not found: $zipPath"
               exit 1
           }
- 
+          # Remove if exists
+          if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractionPath }
           # Create unique extraction folder
           New-Item -ItemType Directory -Force -Path $extractPath
  
