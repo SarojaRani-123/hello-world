@@ -45,8 +45,31 @@ jobs:
         run: |
           $version = "${{ github.event.inputs.version }}"
           Write-Host "Using artifact version: $version"
+       
+       # Download artifact ZIP from repo
+      - name: Download artifact ZIP from repo
+        shell: pwsh
+        run: |
+         $version = "${{ github.event.inputs.version }}"
+         $zipPath = "./artifacts/artifacts_$version.zip"
+         $extractPath = "./artifacts/extracted"
+         
+          if (-Not (Test-Path $zipPath)) {
+            Write-Host "❌ Artifact ZIP not found: $zipPath"
+        
+          exit 1
+          }
+ 
+    # Ensure extraction folder exists
+    if (-Not (Test-Path $extractPath)) { New-Item -ItemType Directory -Force -Path $extractPath }
+ 
+    # Extract ZIP
+   Add-Type -AssemblyName System.IO.Compression.FileSystem
+   [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractPath)
+ 
+    Write-Host "✅ Artifact $zipPath extracted to $extractPath"
           
-     # Download Artifacts from GitHub
+      # Download Artifacts from GitHub
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
