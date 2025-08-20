@@ -38,7 +38,7 @@ jobs:
           } else {
               Write-Host "Config not found for $client in $env environment"
               exit 1
- }
+             }
       # Set Artifact Version
       - name: Set Artifact Version
         shell: pwsh
