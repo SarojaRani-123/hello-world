@@ -1,0 +1,69 @@
+name: Deploy Application (Hosted Runner, Download Artifacts)
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: 'Client name (e.g., coa)'
+        required: true
+      env:
+        description: 'Environment (pp, prod, qa)'
+        required: true
+      version:
+        description: 'Artifact version (e.g., v8.7.2025.06)'
+        required: true
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+ 
+    steps:
+      # Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+ 
+      # Load Client Config
+      - name: Load Client Config
+        shell: pwsh
+        run: |
+          $client = "${{ github.event.inputs.client }}"
+          $env = "${{ github.event.inputs.env }}"
+          $configPath = ".\configs\$client\$env\config.json"
+          
+          if (Test-Path $configPath) {
+              Write-Host "Config loaded for $client in $env environment"
+              $config = Get-Content $configPath | ConvertFrom-Json
+              Write-Host "App Root Path: $($config.appRootPath)"
+              Write-Host "APIs: $($config.apiNames -join ', ')"
+          } else {
+              Write-Host "Config not found for $client in $env environment"
+              exit 1
+ 
+      # Set Artifact Version
+      - name: Set Artifact Version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          Write-Host "Using artifact version: $version"
+ 
+      # Download Artifacts from GitHub
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: "artifact-$version"
+          path: ./artifacts/extracted
+ 
+      # Deploy APIs to Local IIS
+      - name: Deploy APIs to Local IIS
+        shell: pwsh
+        run: |
+          $iisRoot = "C:\inetpub\wwwroot\dummy-site"
+          if (-Not (Test-Path $iisRoot)) { New-Item -ItemType Directory -Path $iisRoot }
+          
+          foreach ($api in $config.apiNames) {
+              $sourcePath = "artifacts/extracted/$api"
+              $destPath = Join-Path $iisRoot $api
+              if (-Not (Test-Path $destPath)) { New-Item -ItemType Directory -Path $destPath }
+              Write-Host "Deploying $api from $sourcePath to $destPath"
+              msdeploy.exe -verb:sync -source:contentPath="$sourcePath" -dest:contentPath="$destPath"
+              Start-Sleep -Seconds 1
