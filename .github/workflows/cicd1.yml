@@ -1,72 +1,106 @@
-name: CI-CD Pipeline
+name: Client Deployment
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: 'Client Name'
+        description: "Client name"
         required: true
+        default: "HelloWorld"
       environment:
-        description: 'Environment (dev/stage/prod)'
+        description: "Target environment (dev/stage/prod)"
         required: true
+        default: "dev"
       version:
-        description: 'Artifact Version (e.g. v8.2025.06)'
+        description: "Artifacts version"
         required: true
+        default: "artifacts_v8.2025.06"
  
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: windows-latest
  
     steps:
-      - name: Step 1 - Checkout repo
+      # Step 1: Checkout repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
  
-      - name: Step 2 - Set variables
+      # Step 2: Setup environment variables
+      - name: ⚙️ Setup variables
         shell: pwsh
         run: |
           echo "CLIENT=${{ github.event.inputs.client }}" >> $env:GITHUB_ENV
           echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $env:GITHUB_ENV
           echo "VERSION=${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
-          echo "ARTIFACTS_DIR=${{ github.workspace }}\\artifacts\\artifacts_${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
+          echo "ARTIFACTS_DIR=${{ github.workspace }}/artifacts/${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
  
-      - name: Step 3 - Verify artifacts folder
+      # Step 3: Load config if needed (dummy here, replace if required)
+      - name: 📄 Load config
         shell: pwsh
         run: |
-          echo "Looking inside: $env:ARTIFACTS_DIR"
-          Get-ChildItem -Path "$env:ARTIFACTS_DIR"
+          Write-Host "Loading configuration for $env:CLIENT in $env:ENVIRONMENT"
  
-      - name: Step 4 - Extract all zip files
+      # Step 4: Extract all .zip files inside artifacts/<version>
+      - name: 📦 Extract Artifacts
         shell: pwsh
         run: |
-          echo "Extracting all .zip files from $env:ARTIFACTS_DIR"
-          Get-ChildItem -Path "$env:ARTIFACTS_DIR" -Filter *.zip | ForEach-Object {
-            $dest = Join-Path $_.DirectoryName ($_.BaseName)
-            echo "Extracting $($_.Name) -> $dest"
-            Expand-Archive -Path $_.FullName -DestinationPath $dest -Force
+          $artifactPath = "$env:ARTIFACTS_DIR"
+          if (-not (Test-Path $artifactPath)) {
+            Write-Error "Artifacts folder not found: $artifactPath"
+            exit 1
           }
  
-      - name: Step 5 - Deploy using MSDeploy
+          $extractPath = Join-Path $env:GITHUB_WORKSPACE "extracted"
+          if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+          New-Item -ItemType Directory -Path $extractPath | Out-Null
+ 
+          $zips = Get-ChildItem -Path $artifactPath -Filter *.zip
+          if ($zips.Count -eq 0) {
+            Write-Error "No .zip files found in $artifactPath"
+            exit 1
+          }
+ 
+          foreach ($zip in $zips) {
+            $dest = Join-Path $extractPath ($zip.BaseName)
+            Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
+            Write-Host "✅ Extracted $($zip.Name) to $dest"
+          }
+ 
+          echo "EXTRACTED_DIR=$extractPath" >> $env:GITHUB_ENV
+ 
+      # Step 5: Deploy with MSDeploy
+      - name: 🚀 Deploy with MSDeploy
         shell: pwsh
         run: |
-          echo "Starting MSDeploy for $env:CLIENT - $env:ENVIRONMENT"
-          $unzippedDirs = Get-ChildItem -Path "$env:ARTIFACTS_DIR" -Directory
-          foreach ($dir in $unzippedDirs) {
-            echo "Deploying $($dir.FullName)"
+          Write-Host "Starting deployment for $env:CLIENT in $env:ENVIRONMENT"
+ 
+          $folders = Get-ChildItem -Path "$env:EXTRACTED_DIR" -Directory
+          if (-not $folders) {
+            Write-Error "No extracted folders found in $env:EXTRACTED_DIR"
+            exit 1
+          }
+ 
+          foreach ($folder in $folders) {
+            Write-Host "Deploying from: $($folder.FullName)"
+ 
             & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
-              -verb:sync `
-              -source:iisApp="$($dir.FullName)" `
-              -dest:iisApp="$env:CLIENT-$env:ENVIRONMENT",computerName="https://targetserver:8172/msdeploy.axd",userName="USERNAME",password="PASSWORD",authType="Basic" `
-              -allowUntrusted
+                -verb:sync `
+                -source:contentPath="$($folder.FullName)" `
+                -dest:auto,computerName="https://target-server.com/msdeploy.axd?site=$env:CLIENT",userName="username",password="password",authType="Basic" `
+                -allowUntrusted
           }
  
-      - name: Step 6 - Cleanup extracted folders
+      # Step 6: Cleanup unzipped artifacts to save space
+      - name: 🧹 Cleanup extracted artifacts
         shell: pwsh
         run: |
-          echo "Cleaning up extracted folders..."
-          Get-ChildItem -Path "$env:ARTIFACTS_DIR" -Directory | ForEach-Object {
-            echo "Removing $($_.FullName)"
-            Remove-Item -Recurse -Force -Path $_.FullName
+          if (Test-Path $env:EXTRACTED_DIR) {
+            Remove-Item -Recurse -Force $env:EXTRACTED_DIR
+            Write-Host "Cleaned up extracted artifacts"
           }
  
-      - name: Step 7 - Success message
-        run: echo "✅ Deployment completed successfully for ${{ github.event.inputs.client }} - ${{ github.event.inputs.environment }} - version ${{ github.event.inputs.version }}"
+      # Step 7: Success message
+      - name: ✅ Deployment finished
+        shell: pwsh
+        run: |
+          Write-Host "Deployment completed for $env:CLIENT in $env:ENVIRONMENT"
