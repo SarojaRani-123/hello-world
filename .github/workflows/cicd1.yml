@@ -1,106 +1,95 @@
-name: Client Deployment
+name: Deploy with MSDeploy
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: "Client name"
+        description: "Client Name"
         required: true
-        default: "HelloWorld"
-      environment:
-        description: "Target environment (dev/stage/prod)"
+      env:
+        description: "Environment (pp, uat, prod, etc.)"
         required: true
-        default: "dev"
       version:
-        description: "Artifacts version"
+        description: "Artifacts Version Folder (e.g. artifacts_v8.2025.06)"
         required: true
-        default: "artifacts_v8.2025.06"
  
 jobs:
   deploy:
     runs-on: windows-latest
  
     steps:
-      # Step 1: Checkout repository
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+      # 1. Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v3
  
-      # Step 2: Setup environment variables
-      - name: ⚙️ Setup variables
+      # 2. Load config for given client/env
+      - name: Load client config
+        id: load-config
         shell: pwsh
         run: |
-          echo "CLIENT=${{ github.event.inputs.client }}" >> $env:GITHUB_ENV
-          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $env:GITHUB_ENV
-          echo "VERSION=${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
-          echo "ARTIFACTS_DIR=${{ github.workspace }}/artifacts/${{ github.event.inputs.version }}" >> $env:GITHUB_ENV
+          $configPath = "configs/${{ github.event.inputs.client }}/${{ github.event.inputs.env }}/config.json"
+          if (!(Test-Path $configPath)) {
+            Write-Error "Config file not found at $configPath"
+            exit 1
+          }
+          $config = Get-Content $configPath | ConvertFrom-Json
+          echo "target_server=$($config.target_server)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "site_name=$($config.site_name)" | Out-File -FilePath $env:GITHUB_ENV -Append
  
-      # Step 3: Load config if needed (dummy here, replace if required)
-      - name: 📄 Load config
+      # 3. Set variables
+      - name: Set variables
+        id: vars
         shell: pwsh
         run: |
-          Write-Host "Loading configuration for $env:CLIENT in $env:ENVIRONMENT"
+          echo "ARTIFACTS_DIR=${{ github.workspace }}/artifacts/${{ github.event.inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "EXTRACT_DIR=${{ github.workspace }}/extracted" | Out-File -FilePath $env:GITHUB_ENV -Append
  
-      # Step 4: Extract all .zip files inside artifacts/<version>
-      - name: 📦 Extract Artifacts
+      # 4. Extract all zip files inside artifacts/version
+      - name: Extract artifacts
         shell: pwsh
         run: |
-          $artifactPath = "$env:ARTIFACTS_DIR"
-          if (-not (Test-Path $artifactPath)) {
-            Write-Error "Artifacts folder not found: $artifactPath"
+          $artifactDir = "${{ env.ARTIFACTS_DIR }}"
+          $extractDir = "${{ env.EXTRACT_DIR }}"
+ 
+          if (!(Test-Path $artifactDir)) {
+            Write-Error "Artifacts folder not found: $artifactDir"
             exit 1
           }
  
-          $extractPath = Join-Path $env:GITHUB_WORKSPACE "extracted"
-          if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
-          New-Item -ItemType Directory -Path $extractPath | Out-Null
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
  
-          $zips = Get-ChildItem -Path $artifactPath -Filter *.zip
-          if ($zips.Count -eq 0) {
-            Write-Error "No .zip files found in $artifactPath"
-            exit 1
+          Get-ChildItem -Path $artifactDir -Filter *.zip | ForEach-Object {
+            $dest = Join-Path $extractDir ($_.BaseName)
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Expand-Archive -Path $_.FullName -DestinationPath $dest -Force
+            Write-Output "Extracted $($_.Name) to $dest"
           }
  
-          foreach ($zip in $zips) {
-            $dest = Join-Path $extractPath ($zip.BaseName)
-            Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
-            Write-Host "✅ Extracted $($zip.Name) to $dest"
-          }
- 
-          echo "EXTRACTED_DIR=$extractPath" >> $env:GITHUB_ENV
- 
-      # Step 5: Deploy with MSDeploy
-      - name: 🚀 Deploy with MSDeploy
+      # 5. Deploy with msdeploy
+      - name: Deploy with MSDeploy
         shell: pwsh
         run: |
-          Write-Host "Starting deployment for $env:CLIENT in $env:ENVIRONMENT"
- 
-          $folders = Get-ChildItem -Path "$env:EXTRACTED_DIR" -Directory
-          if (-not $folders) {
-            Write-Error "No extracted folders found in $env:EXTRACTED_DIR"
-            exit 1
-          }
- 
-          foreach ($folder in $folders) {
-            Write-Host "Deploying from: $($folder.FullName)"
- 
+          $extractDir = "${{ env.EXTRACT_DIR }}"
+          Get-ChildItem -Path $extractDir -Directory | ForEach-Object {
+            $packagePath = $_.FullName
+            Write-Output "Deploying $($_.Name) from $packagePath ..."
             & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
-                -verb:sync `
-                -source:contentPath="$($folder.FullName)" `
-                -dest:auto,computerName="https://target-server.com/msdeploy.axd?site=$env:CLIENT",userName="username",password="password",authType="Basic" `
-                -allowUntrusted
+              -verb:sync `
+              -source:contentPath="$packagePath" `
+              -dest:contentPath="${{ env.site_name }}",computerName="https://${{ env.target_server }}/msdeploy.axd",userName="xxx",password="yyy",authtype="Basic" `
+              -allowUntrusted
           }
  
-      # Step 6: Cleanup unzipped artifacts to save space
-      - name: 🧹 Cleanup extracted artifacts
+      # 6. Cleanup extracted zips to save space
+      - name: Cleanup extracted files
+        if: always()
         shell: pwsh
         run: |
-          if (Test-Path $env:EXTRACTED_DIR) {
-            Remove-Item -Recurse -Force $env:EXTRACTED_DIR
-            Write-Host "Cleaned up extracted artifacts"
+          if (Test-Path "${{ env.EXTRACT_DIR }}") {
+            Remove-Item -Recurse -Force "${{ env.EXTRACT_DIR }}"
+            Write-Output "Cleaned up extracted files."
           }
  
-      # Step 7: Success message
-      - name: ✅ Deployment finished
-        shell: pwsh
-        run: |
-          Write-Host "Deployment completed for $env:CLIENT in $env:ENVIRONMENT"
+      # 7. Finish
+      - name: Deployment completed
+        run: echo "Deployment completed for client=${{ github.event.inputs.client }}, env=${{ github.event.inputs.env }}, version=${{ github.event.inputs.version }}"
