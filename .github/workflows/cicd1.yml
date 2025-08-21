@@ -34,10 +34,6 @@ jobs:
           choco install webdeploy -y
           Write-Host "MSDeploy Installed"
  
-      # 3. Setup PowerShell
-      - name: Setup PowerShell
-        uses: actions/setup-powershell@v2
- 
       # 4. Load Config
       - name: Load Config
         shell: pwsh
