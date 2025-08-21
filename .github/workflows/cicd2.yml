@@ -1,0 +1,103 @@
+name: Deploy App
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: "Client name"
+        required: true
+      env:
+        description: "Environment (dev/pp/prod)"
+        required: true
+      version:
+        description: "Version (example: v8.2025.06)"
+        required: true
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+ 
+    env:
+      CLIENT: ${{ github.event.inputs.client }}
+      ENV: ${{ github.event.inputs.env }}
+      VERSION: ${{ github.event.inputs.version }}
+ 
+    steps:
+      # 1. Checkout Repo
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+ 
+      # 2. Setup MSDeploy
+      - name: Setup MSDeploy
+        shell: pwsh
+        run: |
+          choco install webdeploy -y
+          Write-Host "MSDeploy Installed"
+ 
+      # 4. Load Config
+      - name: Load Config
+        shell: pwsh
+        run: |
+          $configPath = "configs/${{ env.CLIENT }}/${{ env.ENV }}/config.json"
+          if (!(Test-Path $configPath)) {
+            Write-Error "Config file not found: $configPath"
+            exit 1
+          }
+          Write-Host "Loaded config from $configPath"
+ 
+      # 5. Extract Artifacts (Unzip)
+      - name: Extract Artifacts
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          Write-Host "Looking for artifacts in $artifactDir"
+ 
+          if (!(Test-Path $artifactDir)) {
+            Write-Error "Artifacts folder not found: $artifactDir"
+            exit 1
+          }
+ 
+          # Debug: list contents before extraction
+          Write-Host "Contents before extraction:"
+          Get-ChildItem -Path $artifactDir -Recurse
+ 
+          # Extract all .zip files inside version folder
+          Get-ChildItem -Path $artifactDir -Recurse -Filter *.zip | ForEach-Object {
+            $zipPath = $_.FullName
+            $destDir = [System.IO.Path]::ChangeExtension($zipPath, $null)
+ 
+            Write-Host "Extracting $zipPath to $destDir"
+            Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
+          }
+ 
+          # Verify extraction
+          Write-Host "Contents after extraction:"
+          Get-ChildItem -Path $artifactDir -Recurse
+ 
+      # 6. Deploy with MSDeploy (API wise)
+      - name: Deploy with MSDeploy
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          $binFolders = Get-ChildItem -Path $artifactDir -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
+ 
+          foreach ($bin in $binFolders) {
+            Write-Host "Deploying API from $($bin.FullName)"
+            & 'C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe' -verb:sync `
+              -source:contentPath="$($bin.FullName)" `
+              -dest:auto,computerName="https://yourserver:8172/msdeploy.axd",userName="youruser",password="yourpassword",authtype="Basic" `
+              -enableRule:DoNotDeleteRule
+          }
+ 
+      # 7. Cleanup Extracted Files (save space)
+      - name: Cleanup Extracted Files
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          Write-Host "Cleaning up extracted folders under $artifactDir"
+ 
+          Get-ChildItem -Path $artifactDir -Recurse -Directory | ForEach-Object {
+            if (Test-Path $_.FullName) {
+              Remove-Item $_.FullName -Recurse -Force
+            }
+          }
