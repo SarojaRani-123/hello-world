@@ -41,7 +41,7 @@ jobs:
         id: vars
         shell: pwsh
         run: |
-          echo "ARTIFACTS_DIR=${{ github.workspace }}/artifacts/artifacts_${{ github.event.inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "ARTIFACTS_DIR= Join-Path "${{ github.workspace }}" "artifacts/artifacts_${{ github.event.inputs.version }}" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "EXTRACT_DIR=${{ github.workspace }}/extracted" | Out-File -FilePath $env:GITHUB_ENV -Append
  
       # 4. Extract all zip files inside artifacts/version
