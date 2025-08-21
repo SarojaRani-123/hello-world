@@ -1,6 +1,6 @@
 {
   "appRootPath": "C:\\inetpub\\wwwroot\\dummy-site",
   "iisSiteName" : "dummy-site",
-  "deploymentPath" : "C:\\inetpub\\wwwroot\\DEPLOYMENT\\Client1-PP"
+  "deploymentPath" : "C:\\inetpub\\wwwroot\\DEPLOYMENT\\Client1-PP",
   "apiNames" : ["API1", "API2", "API3"],
 }
