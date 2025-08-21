@@ -1,105 +1,107 @@
-name: Deploy Application
+name: Deploy App
  
 on:
   workflow_dispatch:
     inputs:
       client:
-        description: 'Client name (e.g., client1)'
+        description: "Client name"
         required: true
       env:
-        description: 'Environment (pp, prod, qa)'
+        description: "Environment (dev/pp/prod)"
         required: true
       version:
-        description: 'Artifact version (e.g., v8.2025.06)'
+        description: "Version (example: v8.2025.06)"
         required: true
  
 jobs:
   deploy:
     runs-on: windows-latest
  
+    env:
+      CLIENT: ${{ github.event.inputs.client }}
+      ENV: ${{ github.event.inputs.env }}
+      VERSION: ${{ github.event.inputs.version }}
+ 
     steps:
-      # 1. Checkout repo
-      - name: Checkout repository
+      # 1. Checkout Repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
  
       # 2. Setup MSDeploy
       - name: Setup MSDeploy
-        shell: powershell
-        run: |
-          Write-Output "Setting up MSDeploy..."
- 
-      # 2️⃣ Load client config
-      - name: Load Client Config
         shell: pwsh
         run: |
-          $client = "${{ github.event.inputs.client }}"
-          $envName = "${{ github.event.inputs.env }}"
-          $configPath = ".\configs\$client\$envName\config.json"
-          if (Test-Path $configPath) {
-              Write-Host "Config loaded for $client in $envName environment"
-              $config = Get-Content $configPath | ConvertFrom-Json
-              Write-Host "App Root Path: $($config.appRootPath)"
-              Write-Host "APIs: $($config.apiNames -join ', ')"
-          } else {
-              Write-Host "Config not found for $client in $envName environment"
-              exit 1
-          }
+          choco install webdeploy -y
+          Write-Host "MSDeploy Installed"
  
-      # 4. Extract Artifacts
-      - name: Extract Artifacts
-        id: extract
-        shell: powershell
+      # 3. Setup PowerShell
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v2
+ 
+      # 4. Load Config
+      - name: Load Config
+        shell: pwsh
         run: |
-          $versionInput = "${{ github.event.inputs.version }}"
-          $artifactDir = Join-Path "${{ github.workspace }}" "artifacts/artifacts_$versionInput"
+          $configPath = "configs/${{ env.CLIENT }}/${{ env.ENV }}/config.json"
+          if (!(Test-Path $configPath)) {
+            Write-Error "Config file not found: $configPath"
+            exit 1
+          }
+          Write-Host "Loaded config from $configPath"
  
-          if (-Not (Test-Path $artifactDir)) {
+      # 5. Extract Artifacts (Unzip)
+      - name: Extract Artifacts
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          Write-Host "Looking for artifacts in $artifactDir"
+ 
+          if (!(Test-Path $artifactDir)) {
             Write-Error "Artifacts folder not found: $artifactDir"
             exit 1
           }
  
-          Write-Output "Looking for zip files in $artifactDir"
-          $zips = Get-ChildItem -Path $artifactDir -Filter *.zip
-          if ($zips.Count -eq 0) {
-            Write-Error "No zip files found in $artifactDir"
-            exit 1
+          # Debug: list contents before extraction
+          Write-Host "Contents before extraction:"
+          Get-ChildItem -Path $artifactDir -Recurse
+ 
+          # Extract all .zip files inside version folder
+          Get-ChildItem -Path $artifactDir -Recurse -Filter *.zip | ForEach-Object {
+            $zipPath = $_.FullName
+            $destDir = [System.IO.Path]::ChangeExtension($zipPath, $null)
+ 
+            Write-Host "Extracting $zipPath to $destDir"
+            Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
           }
  
-          foreach ($zip in $zips) {
-            $dest = Join-Path $artifactDir ($zip.BaseName)
-            Write-Output "Extracting $($zip.Name) to $dest"
-            Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
-          }
+          # Verify extraction
+          Write-Host "Contents after extraction:"
+          Get-ChildItem -Path $artifactDir -Recurse
  
-          echo "artifactDir=$artifactDir" >> $env:GITHUB_OUTPUT
- 
-      # 5. Verify Extracted
-      - name: Verify Extracted
-        shell: powershell
-        run: |
-          $artifactDir = "${{ steps.extract.outputs.artifactDir }}"
-          Write-Output "Contents of $artifactDir:"
-          Get-ChildItem -Recurse $artifactDir
- 
-      # 6. Deploy using MSDeploy
+      # 6. Deploy with MSDeploy (API wise)
       - name: Deploy with MSDeploy
-        shell: powershell
+        shell: pwsh
         run: |
-          $artifactDir = "${{ steps.extract.outputs.artifactDir }}"
-          Write-Output "Deploying from $artifactDir with MSDeploy..."
-          # Example command
-          # & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
-          #   -verb:sync `
-          #   -source:contentPath="$artifactDir/gcapp/bin" `
-# -dest:auto,computerName="https://target-server:8172/msdeploy.axd",userName="xxx",password="xxx",authtype="Basic"
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          $binFolders = Get-ChildItem -Path $artifactDir -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
  
-      # 7. Cleanup
-      - name: Cleanup Extracted Folders
-        if: always()
-        shell: powershell
+          foreach ($bin in $binFolders) {
+            Write-Host "Deploying API from $($bin.FullName)"
+            & 'C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe' -verb:sync `
+              -source:contentPath="$($bin.FullName)" `
+              -dest:auto,computerName="https://yourserver:8172/msdeploy.axd",userName="youruser",password="yourpassword",authtype="Basic" `
+              -enableRule:DoNotDeleteRule
+          }
+ 
+      # 7. Cleanup Extracted Files (save space)
+      - name: Cleanup Extracted Files
+        shell: pwsh
         run: |
-          $artifactDir = "${{ steps.extract.outputs.artifactDir }}"
-          if (Test-Path $artifactDir) {
-            Write-Output "Cleaning up extracted folders inside $artifactDir..."
-            Get-ChildItem -Path $artifactDir -Directory | Remove-Item -Recurse -Force
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          Write-Host "Cleaning up extracted folders under $artifactDir"
+ 
+          Get-ChildItem -Path $artifactDir -Recurse -Directory | ForEach-Object {
+            if (Test-Path $_.FullName) {
+              Remove-Item $_.FullName -Recurse -Force
+            }
           }
