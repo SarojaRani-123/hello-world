@@ -74,20 +74,49 @@ jobs:
           Write-Host "Contents after extraction:"
           Get-ChildItem -Path $artifactDir -Recurse
  
-      # 6. Deploy with MSDeploy (API wise)
       - name: Deploy with MSDeploy
-        shell: pwsh
-        run: |
-          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
-          $binFolders = Get-ChildItem -Path $artifactDir -Recurse -Directory | Where-Object { $_.Name -eq "bin" }
+  shell: pwsh
+  run: |
+    $artifactDir = "artifacts/artifacts_${{ env.VERSION }}"
+    $deploymentPath = "${{ env.deploymentPath }}"
  
-          foreach ($bin in $binFolders) {
-            Write-Host "Deploying API from $($bin.FullName)"
-            & 'C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe' -verb:sync `
-              -source:contentPath="$($bin.FullName)" `
-              -dest:auto,computerName="https://yourserver:8172/msdeploy.axd",userName="youruser",password="yourpassword",authtype="Basic" `
-              -enableRule:DoNotDeleteRule
-          }
+    if (!(Test-Path $artifactDir)) {
+        throw "Artifacts directory not found: $artifactDir"
+    }
+ 
+    # Loop through each zip in the artifact folder
+    Get-ChildItem -Path $artifactDir -Filter *.zip | ForEach-Object {
+        $zipFile = $_.FullName
+        $appName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+        $extractPath = Join-Path $artifactDir $appName
+        $targetPath = Join-Path $deploymentPath $appName
+ 
+        Write-Host "Processing $($_.Name)..."
+ 
+        # Clean the extract folder if it exists
+        if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+ 
+        # Extract zip to temporary folder (inside artifactDir)
+        Expand-Archive -Path $zipFile -DestinationPath $extractPath -Force
+        Write-Host "Extracted $($_.Name) -> $extractPath"
+ 
+        # MSDeploy to local simulation (hosted runner)
+        & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
+          -verb:sync `
+          -source:contentPath="$extractPath" `
+          -dest:contentPath="$targetPath" `
+          -enableRule:DoNotDeleteRule `
+          -allowUntrusted
+ 
+        if ($LASTEXITCODE -ne 0) {
+            throw "MSDeploy failed for $appName"
+        } else {
+            Write-Host "✅ Deployed $appName -> $targetPath via MSDeploy"
+        }
+    }
+ 
+    Write-Host "✅ All artifacts deployed successfully via MSDeploy."
+ 
  
       # 7. Cleanup Extracted Files (save space)
       - name: Cleanup Extracted Files
