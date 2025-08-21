@@ -3,14 +3,14 @@ name: Deploy Application
 on:
   workflow_dispatch:
     inputs:
+      client:
+        description: 'Client name (e.g., client1)'
+        required: true
+      env:
+        description: 'Environment (pp, prod, qa)'
+        required: true
       version:
-        description: "Artifact version (example: v8.2025.06)"
-        required: true
-      environment:
-        description: "Client environment (example: dev, pp, prod)"
-        required: true
-      client: 
-        description: "Client name"
+        description: 'Artifact version (e.g., v8.2025.06)'
         required: true
  
 jobs:
