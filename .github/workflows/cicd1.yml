@@ -28,19 +28,22 @@ jobs:
         run: |
           Write-Output "Setting up MSDeploy..."
  
-      # 3. Load Config
-      - name: Load Config
-        id: loadconfig
-        shell: powershell
+      # 2️⃣ Load client config
+      - name: Load Client Config
+        shell: pwsh
         run: |
-          $envName = "${{ github.event.inputs.environment }}"
-          $configPath = "configs/client/$envName/config.json"
-          if (-Not (Test-Path $configPath)) {
-            Write-Error "Config file not found: $configPath"
-            exit 1
+          $client = "${{ github.event.inputs.client }}"
+          $envName = "${{ github.event.inputs.env }}"
+          $configPath = ".\configs\$client\$envName\config.json"
+          if (Test-Path $configPath) {
+              Write-Host "Config loaded for $client in $envName environment"
+              $config = Get-Content $configPath | ConvertFrom-Json
+              Write-Host "App Root Path: $($config.appRootPath)"
+              Write-Host "APIs: $($config.apiNames -join ', ')"
+          } else {
+              Write-Host "Config not found for $client in $envName environment"
+              exit 1
           }
-          Write-Output "Using config: $configPath"
-          echo "configPath=$configPath" >> $env:GITHUB_OUTPUT
  
       # 4. Extract Artifacts
       - name: Extract Artifacts
