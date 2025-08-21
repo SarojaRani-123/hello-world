@@ -16,117 +16,110 @@ on:
 jobs:
   deploy:
     runs-on: windows-latest
- 
     env:
       CLIENT: ${{ github.event.inputs.client }}
       ENV: ${{ github.event.inputs.env }}
       VERSION: ${{ github.event.inputs.version }}
- 
     steps:
-      # 1. Checkout Repo
+      # 1️⃣ Checkout Repo
       - name: Checkout Repository
         uses: actions/checkout@v4
  
-      # 2. Setup MSDeploy
+      # 2️⃣ Setup MSDeploy
       - name: Setup MSDeploy
         shell: pwsh
         run: |
           choco install webdeploy -y
           Write-Host "MSDeploy Installed"
  
-      # 4. Load Config
+      # 3️⃣ Load Config
       - name: Load Config
         shell: pwsh
         run: |
           $configPath = "configs/${{ env.CLIENT }}/${{ env.ENV }}/config.json"
           if (!(Test-Path $configPath)) {
-            Write-Error "Config file not found: $configPath"
-            exit 1
+              Write-Error "Config file not found: $configPath"
+              exit 1
           }
+          $config = Get-Content $configPath | ConvertFrom-Json
           Write-Host "Loaded config from $configPath"
+          Write-Host "Deployment Path: $($config.deploymentPath)"
+          echo "deploymentPath=$($config.deploymentPath)" >> $env:GITHUB_ENV
  
-      # 5. Extract Artifacts (Unzip)
+      # 4️⃣ Extract Artifacts (Unzip)
       - name: Extract Artifacts
         shell: pwsh
         run: |
           $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
           Write-Host "Looking for artifacts in $artifactDir"
- 
           if (!(Test-Path $artifactDir)) {
-            Write-Error "Artifacts folder not found: $artifactDir"
-            exit 1
+              Write-Error "Artifacts folder not found: $artifactDir"
+              exit 1
           }
  
-          # Debug: list contents before extraction
+          # List contents before extraction
           Write-Host "Contents before extraction:"
           Get-ChildItem -Path $artifactDir -Recurse
  
           # Extract all .zip files inside version folder
           Get-ChildItem -Path $artifactDir -Recurse -Filter *.zip | ForEach-Object {
-            $zipPath = $_.FullName
-            $destDir = [System.IO.Path]::ChangeExtension($zipPath, $null)
- 
-            Write-Host "Extracting $zipPath to $destDir"
-            Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
+              $zipPath = $_.FullName
+              $destDir = [System.IO.Path]::ChangeExtension($zipPath, $null)
+              Write-Host "Extracting $zipPath to $destDir"
+              Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
           }
  
           # Verify extraction
           Write-Host "Contents after extraction:"
           Get-ChildItem -Path $artifactDir -Recurse
  
+      # 5️⃣ Deploy with MSDeploy
       - name: Deploy with MSDeploy
-  shell: pwsh
-  run: |
-    $artifactDir = "artifacts/artifacts_${{ env.VERSION }}"
-    $deploymentPath = "${{ env.deploymentPath }}"
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
+          $deploymentPath = "${{ env.deploymentPath }}"
+          if (!(Test-Path $artifactDir)) {
+              throw "Artifacts directory not found: $artifactDir"
+          }
  
-    if (!(Test-Path $artifactDir)) {
-        throw "Artifacts directory not found: $artifactDir"
-    }
+          # Loop through each extracted folder and deploy
+          Get-ChildItem -Path $artifactDir -Directory | ForEach-Object {
+              $appName = $_.Name
+              $extractPath = $_.FullName
+              $targetPath = Join-Path $deploymentPath $appName
  
-    # Loop through each zip in the artifact folder
-    Get-ChildItem -Path $artifactDir -Filter *.zip | ForEach-Object {
-        $zipFile = $_.FullName
-        $appName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
-        $extractPath = Join-Path $artifactDir $appName
-        $targetPath = Join-Path $deploymentPath $appName
+              Write-Host "Deploying $appName from $extractPath to $targetPath via MSDeploy"
  
-        Write-Host "Processing $($_.Name)..."
+              & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
+                -verb:sync `
+                -source:contentPath="$extractPath" `
+                -dest:contentPath="$targetPath" `
+                -enableRule:DoNotDeleteRule `
+                -allowUntrusted
  
-        # Clean the extract folder if it exists
-        if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
+              if ($LASTEXITCODE -ne 0) {
+                  throw "MSDeploy failed for $appName"
+              } else {
+                  Write-Host "✅ Deployed $appName -> $targetPath"
+              }
+          }
  
-        # Extract zip to temporary folder (inside artifactDir)
-        Expand-Archive -Path $zipFile -DestinationPath $extractPath -Force
-        Write-Host "Extracted $($_.Name) -> $extractPath"
+          Write-Host "✅ All artifacts deployed successfully via MSDeploy."
  
-        # MSDeploy to local simulation (hosted runner)
-        & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
-          -verb:sync `
-          -source:contentPath="$extractPath" `
-          -dest:contentPath="$targetPath" `
-          -enableRule:DoNotDeleteRule `
-          -allowUntrusted
+      # 6️⃣ Post-deployment step (placeholder)
+      - name: Post Deployment Step
+        run: Write-Host "Post-deployment step executed"
  
-        if ($LASTEXITCODE -ne 0) {
-            throw "MSDeploy failed for $appName"
-        } else {
-            Write-Host "✅ Deployed $appName -> $targetPath via MSDeploy"
-        }
-    }
- 
-    Write-Host "✅ All artifacts deployed successfully via MSDeploy."
- 
- 
-      # 7. Cleanup Extracted Files (save space)
+      # 7️⃣ Cleanup Extracted Files
       - name: Cleanup Extracted Files
         shell: pwsh
         run: |
           $artifactDir = "${{ github.workspace }}/artifacts/artifacts_${{ env.VERSION }}"
           Write-Host "Cleaning up extracted folders under $artifactDir"
- 
           Get-ChildItem -Path $artifactDir -Recurse -Directory | ForEach-Object {
-            if (Test-Path $_.FullName) {
-              Remove-Item $_.FullName -Recurse -Force
-            }
+              if (Test-Path $_.FullName) {
+                  Remove-Item $_.FullName -Recurse -Force
+              }
           }
+ 
