@@ -1,0 +1,89 @@
+name: Deploy Artifacts with MSDeploy
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: "Client name"
+        required: true
+        default: "client1"
+      environment:
+        description: "Environment name"
+        required: true
+        default: "dev"
+      version:
+        description: "Artifact version (example: v8.2025.06)"
+        required: true
+        default: "v8.2025.06"
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+ 
+    env:
+      CLIENT: ${{ github.event.inputs.client }}
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+      ARTIFACT_VERSION: ${{ github.event.inputs.version }}
+ 
+    steps:
+      # 1️⃣ Checkout repo
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+ 
+      # 2️⃣ Select Client
+      - name: Select Client
+        run: echo "Deploying for client: ${{ env.CLIENT }}"
+ 
+      # 3️⃣ Select Environment
+      - name: Select Environment
+        run: echo "Target environment: ${{ env.ENVIRONMENT }}"
+ 
+      # 4️⃣ Select Artifact Version
+      - name: Select Artifact Version
+        run: echo "Using artifact version: ${{ env.ARTIFACT_VERSION }}"
+ 
+      # 5️⃣ Extract all ZIPs inside version folder
+      - name: Extract All Artifact ZIPs
+        shell: pwsh
+        run: |
+          $version = "${{ env.ARTIFACT_VERSION }}"
+          $artifactDir = "artifacts/artifacts_$version"
+ 
+          if (-Not (Test-Path $artifactDir)) {
+            Write-Host "❌ Artifact directory not found: $artifactDir"
+            exit 1
+          }
+ 
+          $zipFiles = Get-ChildItem -Path $artifactDir -Filter *.zip
+          if ($zipFiles.Count -eq 0) {
+            Write-Host "⚠️ No zip files found inside $artifactDir"
+          }
+ 
+          foreach ($zip in $zipFiles) {
+            $destDir = Join-Path $artifactDir ($zip.BaseName)
+            Write-Host "📦 Extracting $($zip.Name) to $destDir..."
+            Expand-Archive -Path $zip.FullName -DestinationPath $destDir -Force
+          }
+ 
+          Write-Host "✅ All zip files extracted successfully into $artifactDir"
+ 
+      # 6️⃣ Deploy using MSDeploy
+      - name: Deploy with MSDeploy
+        shell: pwsh
+        run: |
+          $version = "${{ env.ARTIFACT_VERSION }}"
+          $artifactDir = "artifacts/artifacts_$version"
+          $unpackedDirs = Get-ChildItem -Path $artifactDir -Directory
+ 
+          foreach ($dir in $unpackedDirs) {
+            Write-Host "🚀 Deploying $($dir.Name) from $($dir.FullName)..."
+            & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
+              -verb:sync `
+              -source:contentPath="$($dir.FullName)" `
+-dest:auto,computerName="https://target-server:8172/msdeploy.axd",username="user",password="pass",authType="Basic" `
+              -allowUntrusted
+          }
+ 
+      # 7️⃣ Confirm Deployment
+      - name: Confirm Deployment
+        run: echo "✅ Deployment completed for client=${{ env.CLIENT }}, env=${{ env.ENVIRONMENT }}, version=${{ env.ARTIFACT_VERSION }}"
