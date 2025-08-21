@@ -6,11 +6,12 @@ on:
       version:
         description: "Artifact version (example: v8.2025.06)"
         required: true
-        default: "v8.2025.06"
       environment:
         description: "Client environment (example: dev, pp, prod)"
         required: true
-        default: "dev"
+      client: 
+        description: "Client name"
+        required: true
  
 jobs:
   deploy:
