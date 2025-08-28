@@ -1,0 +1,128 @@
+name: Deployment App
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      client:
+        description: "Client name"
+        required: true
+      env:
+        description: "Environment (dev/pp/prod)"
+        required: true
+      version:
+        description: "Version (example: v8.2025.06)"
+        required: true
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+    env:
+      CLIENT: ${{ github.event.inputs.client }}
+      ENV: ${{ github.event.inputs.env }}
+      VERSION: ${{ github.event.inputs.version }}
+ 
+    steps:
+      # 1️⃣ Checkout Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+ 
+      # 2️⃣ Setup MSDeploy
+      - name: Setup MSDeploy
+        shell: pwsh
+        run: |
+          choco install webdeploy -y
+          Write-Host "MSDeploy Installed"
+ 
+      # 3️⃣ Load Config
+      - name: Load Config
+        shell: pwsh
+        run: |
+          $configPath = "configs/${{ env.CLIENT }}/${{ env.ENV }}/config.json"
+          if (!(Test-Path $configPath)) {
+              Write-Error "Config file not found: $configPath"
+              exit 1
+          }
+          $config = Get-Content $configPath | ConvertFrom-Json
+          Write-Host "Loaded config from $configPath"
+          Write-Host "Deployment Path: $($config.deploymentPath)"
+          echo "deploymentPath=$($config.deploymentPath)" >> $env:GITHUB_ENV
+ 
+      # 4️⃣ Download Artifacts from GitHub Release
+      - name: Download Artifacts from Release
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/${{ env.VERSION }}"
+          if (!(Test-Path $artifactDir)) { New-Item -ItemType Directory -Path $artifactDir -Force }
+ 
+          Write-Host "Fetching release info for tag $env:VERSION..."
+          $releaseUrl = "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ env.VERSION }}"
+          $headers = @{ Authorization = "token $env:GITHUB_TOKEN"; "User-Agent" = "PowerShell" }
+ 
+          try {
+              $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers -Method Get
+          } catch {
+              Write-Error "Release not found for tag $env:VERSION"
+              exit 1
+          }
+ 
+          foreach ($asset in $release.assets) {
+              $assetName = $asset.name
+              $downloadUrl = $asset.url
+              $outPath = Join-Path $artifactDir $assetName
+ 
+              Write-Host "Downloading asset $assetName..."
+              Invoke-RestMethod -Uri $downloadUrl -Headers @{ Authorization = "token $env:GITHUB_TOKEN"; "Accept"="application/octet-stream"; "User-Agent"="PowerShell" } -OutFile $outPath
+          }
+ 
+      # 5️⃣ Extract Artifacts
+      - name: Extract Artifacts
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/${{ env.VERSION }}"
+          Write-Host "Extracting artifact zips..."
+          Get-ChildItem -Path $artifactDir -Filter *.zip | ForEach-Object {
+              $zipPath = $_.FullName
+              $destDir = [System.IO.Path]::ChangeExtension($zipPath, $null)
+              Expand-Archive -Path $zipPath -DestinationPath $destDir -Force
+          }
+ 
+      # 6️⃣ Deploy with MSDeploy
+      - name: Deploy with MSDeploy
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/${{ env.VERSION }}"
+          $deploymentPath = "${{ env.deploymentPath }}"
+ 
+          Get-ChildItem -Path $artifactDir -Directory | ForEach-Object {
+              $appName = $_.Name
+              $extractPath = $_.FullName
+              $targetPath = Join-Path $deploymentPath $appName
+              Write-Host "Deploying $appName from $extractPath to $targetPath via MSDeploy"
+              & "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe" `
+                -verb:sync `
+                -source:contentPath="$extractPath" `
+                -dest:contentPath="$targetPath" `
+                -enableRule:DoNotDeleteRule `
+                -allowUntrusted
+              if ($LASTEXITCODE -ne 0) {
+                  throw "MSDeploy failed for $appName"
+              } else {
+                  Write-Host "✅ Deployed $appName -> $targetPath"
+              }
+          }
+ 
+      # 7️⃣ Post-deployment step
+      - name: Post Deployment Step
+        run: Write-Host "Post-deployment step executed"
+ 
+      # 8️⃣ Cleanup Extracted Files
+      - name: Cleanup Extracted Files
+        shell: pwsh
+        run: |
+          $artifactDir = "${{ github.workspace }}/artifacts/${{ env.VERSION }}"
+          Get-ChildItem -Path $artifactDir -Recurse -Directory | ForEach-Object {
+              if (Test-Path $_.FullName) {
+                  Remove-Item $_.FullName -Recurse -Force
+              }
+          }
+ 
