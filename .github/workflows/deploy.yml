@@ -25,11 +25,11 @@ jobs:
           
       - name: Syntax check playbook
         run: |
-          ansible-playbook -i localhost, playbook.yml --syntax-check
+          ansible-playbook -i localhost, instancesetup.yml --syntax-check
  
       - name: Dry run (check mode)
         run: |
-          ansible-playbook -i localhost, playbook.yml --check || true
+          ansible-playbook -i localhost, instancesetup.yml --check || true
           
  
       - name: Run playbook on Windows runner
