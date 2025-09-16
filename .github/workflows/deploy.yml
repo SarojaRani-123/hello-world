@@ -1,0 +1,25 @@
+name: test-iis-playbook
+ 
+on:
+  workflow_dispatch:
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Install Python and Ansible
+        run: |
+          pip install ansible pywinrm
+          ansible-galaxy collection install ansible.windows microsoft.iis
+ 
+      - name: Create inventory for localhost
+        run: |
+          echo "[windows]" > inventory.ini
+          echo "localhost ansible_connection=local" >> inventory.ini
+ 
+      - name: Run playbook on Windows runner
+        run: |
+          ansible-playbook -i inventory.ini playbook.yml
+ 
