@@ -5,7 +5,7 @@ on:
  
 jobs:
   deploy:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Setup python
@@ -22,6 +22,15 @@ jobs:
         run: |
           echo "[windows]" > inventory.ini
           echo "localhost ansible_connection=local" >> inventory.ini
+          
+      - name: Syntax check playbook
+        run: |
+          ansible-playbook -i localhost, playbook.yml --syntax-check
+ 
+      - name: Dry run (check mode)
+        run: |
+          ansible-playbook -i localhost, playbook.yml --check || true
+          
  
       - name: Run playbook on Windows runner
         run: |
