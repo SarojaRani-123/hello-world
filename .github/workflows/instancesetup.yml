@@ -1,9 +1,8 @@
----
 - name: Deploy IIS with Folder Structure and Applications
   hosts: windows
+  gather_facts: no
   vars_files:
     - vars.yml  # Include your vars file here
- 
   tasks:
     # Step 1: Install Server Manager and IIS using DISM
     - name: Install Server Manager and IIS using DISM
@@ -37,14 +36,14 @@
         path: C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}
         state: directory
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Check if enabled
+      when: apps[item].enabled == 1
  
     # Step 6: Create CloudAPI folder structure if enabled
     - name: Create CloudAPI folder structure
       win_file:
         path: C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI
         state: directory
-      when: cloudapis.CloudAPI.enabled == 1  # Check if CloudAPI is enabled
+      when: cloudapis.CloudAPI.enabled == 1
  
     # Step 7: Create subfolders for CloudAPI applications if enabled
     - name: Create subfolders for CloudAPI applications
@@ -54,7 +53,7 @@
       loop: "{{ cloudapis.CloudAPI.subfolders }}"
       loop_control:
         label: "{{ item.name }}"
-      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1  # Check if enabled
+      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1
  
     # Step 8: Create IIS site for the client (no binding here)
     - name: Create IIS site '{{ site_name }}'
@@ -63,20 +62,20 @@
         New-WebSite -Name '{{ site_name }}' -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}' -Port 80
       register: create_site
  
-    # Step 9: Ensure application pools exist for each application with the specified name format
+    # Step 9: Ensure application pools exist for each application
     - name: Create application pools for applications
       win_shell: |
         Import-Module WebAdministration
         New-WebAppPool -Name 'app_pool_{{ site_name }}_{{ item }}'
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Check if enabled
+      when: apps[item].enabled == 1
  
     # Step 10: Create application pool for CloudAPI if enabled
     - name: Create application pool for CloudAPI
       win_shell: |
         Import-Module WebAdministration
         New-WebAppPool -Name 'app_pool_{{ site_name }}_CloudAPI'
-      when: cloudapis.CloudAPI.enabled == 1  # Check if CloudAPI is enabled
+      when: cloudapis.CloudAPI.enabled == 1
  
     # Step 11: Create application pools for CloudAPI subfolders if enabled
     - name: Create application pools for CloudAPI subfolders
@@ -85,10 +84,10 @@
         New-WebAppPool -Name 'app_pool_{{ site_name }}_CloudAPI_{{ item.name }}'
       loop: "{{ cloudapis.CloudAPI.subfolders }}"
       loop_control:
-       label: "{{ item.name }}"
-      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1  # Check if enabled
+        label: "{{ item.name }}"
+      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1
  
-    # Step 12: Add HTTP and HTTPS bindings for the site using host headers
+    # Step 12: Add HTTP and HTTPS bindings
     - name: Add HTTP and HTTPS bindings to '{{ site_name }}' site
       win_shell: |
         Import-Module WebAdministration
@@ -96,41 +95,41 @@
         New-WebBinding -Name '{{ site_name }}' -Protocol https -Port 443 -HostHeader '{{ domain_name }}'
       when: create_site.changed
  
-    # Step 13: Map applications to their respective application pools
+    # Step 13: Map applications to application pools
     - name: Map applications to application pools
       win_shell: |
         Import-Module WebAdministration
-        New-WebApplication -Site '{{ site_name }}' -Name '{{ item }}' \
-        -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}' \
+        New-WebApplication -Site '{{ site_name }}' -Name '{{ item }}' `
+        -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\{{ item }}' `
         -ApplicationPool 'app_pool_{{ site_name }}_{{ item }}'
       loop: "{{ apps.keys() }}"
-      when: apps[item].enabled == 1  # Check if enabled
+      when: apps[item].enabled == 1
  
-    # Step 13.1: Map CloudAPI to its application pool
+    # Step 13.1: Map CloudAPI to application pool
     - name: Map CloudAPI to application pool
       win_shell: |
         Import-Module WebAdministration
-        New-WebApplication -Site '{{ site_name }}' -Name 'CloudAPI' \
-        -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI' \
+        New-WebApplication -Site '{{ site_name }}' -Name 'CloudAPI' `
+        -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI' `
         -ApplicationPool 'app_pool_{{ site_name }}_CloudAPI'
-      when: cloudapis.CloudAPI.enabled == 1  # Check if CloudAPI is enabled
+      when: cloudapis.CloudAPI.enabled == 1
  
-    # Step 13.2: Map CloudAPI subfolders to their respective application pools
+    # Step 13.2: Map CloudAPI subfolders to application pools
     - name: Map CloudAPI subfolders to their respective application pools
       win_shell: |
         Import-Module WebAdministration
-          New-WebApplication -Site '{{ site_name }}' -Name 'CloudAPI/{{ item.name }}' \
-         -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI\{{ item.name }}' \
-           -ApplicationPool 'app_pool_{{ site_name }}_CloudAPI_{{ item.name }}'
+        New-WebApplication -Site '{{ site_name }}' -Name 'CloudAPI/{{ item.name }}' `
+        -PhysicalPath 'C:\inetpub\wwwroot\deployment\{{ site_name }}\CloudAPI\{{ item.name }}' `
+        -ApplicationPool 'app_pool_{{ site_name }}_CloudAPI_{{ item.name }}'
       loop: "{{ cloudapis.CloudAPI.subfolders }}"
       loop_control:
         label: "{{ item.name }}"
-      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1  # Check if enabled
+      when: cloudapis.CloudAPI.enabled == 1 and item.enabled == 1
  
-# Step 14: Fetch the node's IP address dynamically (exclude 127.0.0.1)
+    # Step 14: Fetch the node's IP address dynamically
     - name: Get the IP address of the node (slave machine)
       win_shell: |
-       $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' }).IPAddress
+        $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' }).IPAddress
         echo $ip
       register: node_ip
  
@@ -141,3 +140,5 @@
         line: "{{ node_ip.stdout }} {{ domain_name }}"
         create: yes
         state: present
+item.name
+ 
