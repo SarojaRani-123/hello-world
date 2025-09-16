@@ -25,14 +25,14 @@ jobs:
           
       - name: Syntax check playbook
         run: |
-          ansible-playbook -i inventory.ini, instancesetup.yml --syntax-check
+          ansible-playbook -i inventory.ini, .github/workflows/instancesetup.yml --syntax-check
  
       - name: Dry run (check mode)
         run: |
-          ansible-playbook -i inventory.ini, instancesetup.yml --check || true
+          ansible-playbook -i inventory.ini, .github/workflows/instancesetup.yml --check || true
           
  
       - name: Run playbook on Windows runner
         run: |
-          ansible-playbook -i inventory.ini instancesetup.yml
+          ansible-playbook -i inventory.ini .github/workflows/instancesetup.yml
  
