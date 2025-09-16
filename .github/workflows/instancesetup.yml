@@ -128,7 +128,10 @@
     # Step 14: Add hosts entry
     - name: Ensure hosts file entry exists
       ansible.windows.win_lineinfile:
-        path: C:\Windows\System32\drivers\etc\hosts
+        path: C:\\Windows\\System32\\drivers\\etc\\hosts
         line: "{{ ansible_hostname }} {{ domain_name }}"
         state: present
+        create: yes
+
+        
  
