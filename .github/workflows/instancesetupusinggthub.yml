@@ -141,3 +141,12 @@ jobs:
             Add-Content -Path $hostsPath -Value $entry
           }
  
+      - name: Validate IIS Deployment
+        shell: powershell
+        run: |
+          Import-Module WebAdministration -SkipEditionCheck -Force
+          Write-Host ">>> IIS Sites:"
+          Get-Website | Format-Table Name, State, PhysicalPath
+          Write-Host ">>> Application Pools:"
+          Get-WebAppPoolState | Format-Table ItemName, Status
+ 
