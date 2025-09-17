@@ -1,0 +1,130 @@
+name: demo-iis-deploy
+ 
+on:
+  workflow_dispatch:
+ 
+jobs:
+  deploy:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - name: Load vars.yml and Configure IIS
+        shell: pwsh
+        run: |
+          # Install YAML parser
+          Install-Module -Name powershell-yaml -Force -Scope CurrentUser
+ 
+          # Load vars.yml
+          $vars = ConvertFrom-Yaml (Get-Content "vars.yml" -Raw)
+          $siteName   = $vars.site_name
+          $domainName = $vars.domain_name
+          $apps       = $vars.apps
+          $cloudAPI   = $vars.cloudapis.CloudAPI
+ 
+          Write-Host ">>> Configuring IIS for $siteName ($domainName)"
+ 
+          ### Step 1: Install IIS ###
+          Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole -All -NoRestart
+          Enable-WindowsOptionalFeature -Online -FeatureName IIS-WebServerManagementTools -All -NoRestart
+ 
+          ### Step 2: Base folder ###
+          $deployPath = "C:\inetpub\wwwroot\deployment"
+          if (!(Test-Path $deployPath)) { New-Item -ItemType Directory -Path $deployPath | Out-Null }
+ 
+          ### Step 3: Site folder ###
+          $sitePath = "$deployPath\$siteName"
+          if (!(Test-Path $sitePath)) { New-Item -ItemType Directory -Path $sitePath | Out-Null }
+ 
+          ### Step 4: Subfolders for apps ###
+          foreach ($app in $apps.Keys) {
+            if ($apps[$app].enabled -eq 1) {
+              $appPath = "$sitePath\$app"
+              if (!(Test-Path $appPath)) { New-Item -ItemType Directory -Path $appPath | Out-Null }
+            }
+          }
+ 
+          ### Step 5: CloudAPI ###
+          if ($cloudAPI.enabled -eq 1) {
+            $cloudAPIPath = "$sitePath\CloudAPI"
+            if (!(Test-Path $cloudAPIPath)) { New-Item -ItemType Directory -Path $cloudAPIPath | Out-Null }
+ 
+            foreach ($sf in $cloudAPI.subfolders) {
+              if ($sf.enabled -eq 1) {
+                $sfPath = "$cloudAPIPath\$($sf.name)"
+                if (!(Test-Path $sfPath)) { New-Item -ItemType Directory -Path $sfPath | Out-Null }
+              }
+            }
+          }
+ 
+          ### Step 6: IIS Site ###
+          Import-Module WebAdministration
+          if (-not (Get-Website | Where-Object { $_.Name -eq $siteName })) {
+            New-Website -Name $siteName -Port 80 -PhysicalPath $sitePath -Force
+            New-WebBinding -Name $siteName -Protocol http -Port 80 -HostHeader $domainName
+            New-WebBinding -Name $siteName -Protocol https -Port 443 -HostHeader $domainName
+          }
+ 
+          ### Step 7: App Pools ###
+          foreach ($app in $apps.Keys) {
+            if ($apps[$app].enabled -eq 1) {
+              $poolName = "app_pool_${siteName}_$app"
+              if (-not (Get-WebAppPoolState -Name $poolName -ErrorAction SilentlyContinue)) {
+                New-WebAppPool -Name $poolName | Out-Null
+              }
+            }
+          }
+ 
+          if ($cloudAPI.enabled -eq 1) {
+            $poolName = "app_pool_${siteName}_CloudAPI"
+            if (-not (Get-WebAppPoolState -Name $poolName -ErrorAction SilentlyContinue)) {
+              New-WebAppPool -Name $poolName | Out-Null
+            }
+            foreach ($sf in $cloudAPI.subfolders) {
+              if ($sf.enabled -eq 1) {
+                $sfPool = "app_pool_${siteName}_CloudAPI_$($sf.name)"
+                if (-not (Get-WebAppPoolState -Name $sfPool -ErrorAction SilentlyContinue)) {
+                  New-WebAppPool -Name $sfPool | Out-Null
+                }
+              }
+            }
+          }
+ 
+          ### Step 8: Map Applications ###
+          foreach ($app in $apps.Keys) {
+            if ($apps[$app].enabled -eq 1) {
+              $poolName = "app_pool_${siteName}_$app"
+              $appPath  = "$sitePath\$app"
+              if (-not (Get-WebApplication -Site $siteName -Name $app -ErrorAction SilentlyContinue)) {
+                New-WebApplication -Site $siteName -Name $app -PhysicalPath $appPath -ApplicationPool $poolName | Out-Null
+              }
+            }
+          }
+ 
+          if ($cloudAPI.enabled -eq 1) {
+            $cloudAPIPath = "$sitePath\CloudAPI"
+            $poolName     = "app_pool_${siteName}_CloudAPI"
+            if (-not (Get-WebApplication -Site $siteName -Name "CloudAPI" -ErrorAction SilentlyContinue)) {
+              New-WebApplication -Site $siteName -Name "CloudAPI" -PhysicalPath $cloudAPIPath -ApplicationPool $poolName | Out-Null
+            }
+            foreach ($sf in $cloudAPI.subfolders) {
+              if ($sf.enabled -eq 1) {
+                $sfPath = "$cloudAPIPath\$($sf.name)"
+                $sfPool = "app_pool_${siteName}_CloudAPI_$($sf.name)"
+                $sfName = "CloudAPI/$($sf.name)"
+                if (-not (Get-WebApplication -Site $siteName -Name $sfName -ErrorAction SilentlyContinue)) {
+                  New-WebApplication -Site $siteName -Name $sfName -PhysicalPath $sfPath -ApplicationPool $sfPool | Out-Null
+                }
+              }
+            }
+          }
+ 
+          ### Step 9: Hosts file entry ###
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.*' }).IPAddress | Select-Object -First 1
+          $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+          $entry = \"$ip $domainName\"
+ 
+          if (-not (Select-String -Path $hostsPath -Pattern $domainName -Quiet)) {
+            Add-Content -Path $hostsPath -Value $entry
+          }
+ 
