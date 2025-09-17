@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
  
       - name: Load vars.yml and Configure IIS
-        shell: pwsh
+        shell: powershell
         run: |
           # Install YAML parser
           Install-Module -Name powershell-yaml -Force -Scope CurrentUser
